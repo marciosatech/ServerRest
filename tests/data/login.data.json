@@ -1,0 +1,6 @@
+{
+  "credenciaisInvalidas": {
+    "email": "login-invalido@example.com",
+    "password": "SenhaInvalida123!"
+  }
+}

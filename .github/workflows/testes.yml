@@ -1,0 +1,93 @@
+name: Testes automatizados
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tipo_teste:
+        description: 'Escolha o conjunto de testes que será executado'
+        required: true
+        default: todos
+        type: choice
+        options:
+          - api
+          - e2e
+          - todos
+
+jobs:
+  executar-testes:
+    name: Executar testes ${{ inputs.tipo_teste || 'todos' }}
+    runs-on: ubuntu-latest
+
+    env:
+      LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Instalar navegador do Playwright
+        if: ${{ inputs.tipo_teste != 'api' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Validar tipos TypeScript
+        run: npm run verificar:tipos
+
+      - name: Executar testes selecionados
+        id: executar-testes
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          tipo_teste="${{ inputs.tipo_teste || 'todos' }}"
+
+          case "$tipo_teste" in
+            api)
+              npm run test:api
+              ;;
+            e2e)
+              npm run test:e2e
+              ;;
+            todos)
+              npm test
+              ;;
+            *)
+              echo "Tipo de teste inválido: $tipo_teste"
+              codigo_saida=1
+              ;;
+          esac
+
+          if [ -z "${codigo_saida+x}" ]; then
+            codigo_saida=$?
+          fi
+          echo "codigo_saida=$codigo_saida" >> "$GITHUB_OUTPUT"
+
+      - name: Gerar resumo da execução
+        if: ${{ always() }}
+        run: npm run gerar:resumo
+
+      - name: Publicar relatório e evidências
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-${{ inputs.tipo_teste || 'todos' }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
+      - name: Falhar job se os testes falharem
+        if: ${{ always() && steps.executar-testes.outputs.codigo_saida != '0' }}
+        run: exit 1
