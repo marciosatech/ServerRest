@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { iconeStatus, somar, taxaAprovacao } from './resumo-calculos.mjs';
 
 const caminhoResultado = 'test-results/result.json';
 const caminhoResumo = process.env.GITHUB_STEP_SUMMARY;
@@ -77,23 +78,6 @@ for (const suite of relatorio.suites ?? []) {
   visitarSuite(suite);
 }
 
-function somar(contador) {
-  return Object.values(contador).reduce((soma, valor) => soma + valor, 0);
-}
-
-function taxaAprovacao(contador) {
-  const executados = contador.passed + contador.failed + contador.flaky;
-  if (executados === 0) return '—';
-  return `${Math.round(((contador.passed + contador.flaky) / executados) * 100)}%`;
-}
-
-function iconeStatus(contador) {
-  if (somar(contador) === 0) return '➖';
-  if (contador.failed > 0) return '❌';
-  if (contador.flaky > 0) return '⚠️';
-  return '✅';
-}
-
 function formatarDuracao(milissegundos = 0) {
   const segundos = Math.round(milissegundos / 1000);
   const minutos = Math.floor(segundos / 60);
@@ -112,6 +96,7 @@ const titulosPorStatus = {
   '❌': 'Falha na execução',
   '⚠️': 'Aprovado com testes instáveis',
   '✅': 'Todos os testes aprovados',
+  '⏭️': 'Todos os testes foram ignorados',
   '➖': 'Nenhum teste executado',
 };
 const statusGeral = iconeStatus(totais);

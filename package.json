@@ -8,6 +8,7 @@
     "test:headed": "playwright test --headed",
     "test:login": "playwright test tests/e2e/login.e2e.spec.ts",
     "gerar:resumo": "node scripts/gerar-resumo-testes.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs",
     "verificar:tipos": "tsc --noEmit",
     "allure:limpar": "node -e \"require('node:fs').rmSync('allure-results',{recursive:true,force:true})\"",
     "allure:gerar": "allure generate allure-results --clean -o allure-report --name \"ServeRest - Automação de testes\"",

@@ -52,6 +52,9 @@ jobs:
       - name: Validar tipos TypeScript
         run: npm run verificar:tipos
 
+      - name: Testar scripts de relatório
+        run: npm run test:scripts
+
       - name: Definir camadas de teste
         id: camadas
         shell: bash
