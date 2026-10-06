@@ -128,6 +128,7 @@ jobs:
     permissions:
       contents: read
       pages: read
+      actions: write
 
     outputs:
       publicar: ${{ steps.preparar-publicacao.outputs.publicar }}
@@ -207,6 +208,20 @@ jobs:
             playwright-report/
             allure-report/
           if-no-files-found: ignore
+
+      - name: Remover artefatos intermediários
+        # Blobs e resultados brutos ja foram consolidados acima. Se algum passo anterior falhar,
+        # este passo nao roda e os intermediarios ficam disponiveis para investigacao.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+            --jq '.artifacts[] | select(.name | test("^(blob|allure-results)-")) | "\(.id) \(.name)"' |
+          while read -r id nome; do
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id"
+            echo "Removido: $nome"
+          done
 
       - name: Preparar publicação do Allure
         id: preparar-publicacao
