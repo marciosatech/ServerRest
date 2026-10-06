@@ -12,9 +12,16 @@ export default defineConfig({
   },
   reporter: [
     ['list'],
-    ['github'],
-    ['html', { open: 'never' }],
-    ['json', { outputFile: 'test-results/result.json' }],
+    // No CI cada camada roda em um job; os blobs sao unificados depois em playwright.merge.config.ts.
+    ...(process.env.CI
+      ? ([
+          ['github'],
+          ['blob', { fileName: `relatorio-${process.env.CAMADA_TESTE ?? 'todos'}.zip` }],
+        ] as const)
+      : ([
+          ['html', { open: 'never' }],
+          ['json', { outputFile: 'test-results/result.json' }],
+        ] as const)),
     [
       'allure-playwright',
       {

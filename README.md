@@ -509,16 +509,22 @@ npm run allure:abrir
 
 ### Como funciona no GitHub Actions
 
-O workflow tem dois jobs:
+O pipeline é dividido em etapas, e o diagrama do Actions mostra onde algo falhou:
 
-1. **Executar testes**
-   - roda a suíte e gera os resultados em `allure-results/`;
-   - baixa a pasta `history/` do próprio relatório publicado no Pages, para manter tendências e histórico;
-   - cria um `executor.json` com o número e o link da execução;
-   - gera o relatório e o envia como artefato de Pages.
-2. **Publicar relatório Allure**
-   - publica o relatório no GitHub Pages com as actions oficiais (`actions/deploy-pages`);
-   - roda mesmo quando há testes falhando, já que o relatório é onde as falhas são analisadas.
+```text
+🔎 Validar código ──► 🧪 Testes API ──┐
+                  └─► 🧪 Testes E2E ──┴──► 📊 Gerar relatórios ──► 🚀 Publicar Allure
+```
+
+1. **🔎 Validar código:** checa os tipos TypeScript e define quais camadas rodam. Falha em segundos se o código não compila.
+2. **🧪 Testes API / E2E:** cada camada roda em paralelo, numa matriz. Só o job de E2E instala o navegador. Os resultados (blob do Playwright e `allure-results`) são salvos como artefatos.
+3. **📊 Gerar relatórios:** roda mesmo com testes falhando.
+   - junta os blobs num único relatório HTML do Playwright (`playwright.merge.config.ts`) e escreve o resumo da execução;
+   - baixa a pasta `history/` do relatório já publicado, para manter tendências e histórico;
+   - cria um `executor.json` e gera o Allure.
+4. **🚀 Publicar Allure:** publica o relatório no GitHub Pages com as actions oficiais.
+
+Para escalar a suíte E2E, basta adicionar sharding à matriz de testes. As etapas de relatório e publicação continuam iguais.
 
 Cada job tem apenas as permissões necessárias: o job de testes só lê, e só o job de publicação pode escrever no Pages.
 

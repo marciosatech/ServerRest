@@ -24,10 +24,106 @@ concurrency:
   group: testes-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  NODE_VERSION: 24
+  TIPO_TESTE: ${{ inputs.tipo_teste || 'todos' }}
+
 jobs:
-  executar-testes:
-    name: Executar testes ${{ inputs.tipo_teste || 'todos' }}
-    runs-on: ubuntu-latest
+  validar:
+    name: 🔎 Validar código
+    runs-on: ubuntu-24.04
+
+    outputs:
+      camadas: ${{ steps.camadas.outputs.camadas }}
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v7
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Validar tipos TypeScript
+        run: npm run verificar:tipos
+
+      - name: Definir camadas de teste
+        id: camadas
+        shell: bash
+        run: |
+          case "$TIPO_TESTE" in
+            api) camadas='["api"]' ;;
+            e2e) camadas='["e2e"]' ;;
+            todos) camadas='["api","e2e"]' ;;
+            *) echo "Tipo de teste inválido: $TIPO_TESTE"; exit 1 ;;
+          esac
+          echo "camadas=$camadas" >> "$GITHUB_OUTPUT"
+
+  testes:
+    name: 🧪 Testes ${{ matrix.camada == 'api' && 'API' || 'E2E' }}
+    needs: validar
+    runs-on: ubuntu-24.04
+
+    strategy:
+      # Uma camada falhando nao interrompe a outra; o relatorio mostra as duas.
+      fail-fast: false
+      matrix:
+        camada: ${{ fromJSON(needs.validar.outputs.camadas) }}
+
+    env:
+      CAMADA_TESTE: ${{ matrix.camada }}
+      LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v7
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Instalar navegador do Playwright
+        if: ${{ matrix.camada == 'e2e' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Executar testes
+        run: npx playwright test tests/${{ matrix.camada }}
+
+      - name: Salvar relatório do Playwright
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-${{ matrix.camada }}
+          path: blob-report/
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Salvar resultados do Allure
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: allure-results-${{ matrix.camada }}
+          path: allure-results/
+          retention-days: 1
+          if-no-files-found: ignore
+
+  relatorios:
+    name: 📊 Gerar relatórios
+    needs: [validar, testes]
+    # Roda mesmo com testes falhando: o relatorio e justamente onde as falhas sao analisadas.
+    if: ${{ !cancelled() && needs.validar.result == 'success' }}
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: read
@@ -36,71 +132,45 @@ jobs:
     outputs:
       publicar: ${{ steps.preparar-publicacao.outputs.publicar }}
 
-    env:
-      LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
-      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
-
     steps:
       - name: Baixar código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Instalar dependências
         run: npm ci
 
-      - name: Instalar navegador do Playwright
-        if: ${{ inputs.tipo_teste != 'api' }}
-        run: npx playwright install --with-deps chromium
+      - name: Baixar relatórios do Playwright
+        uses: actions/download-artifact@v8
+        with:
+          pattern: blob-*
+          path: todos-blobs
+          merge-multiple: true
 
-      - name: Validar tipos TypeScript
-        run: npm run verificar:tipos
+      - name: Baixar resultados do Allure
+        uses: actions/download-artifact@v8
+        with:
+          pattern: allure-results-*
+          path: allure-results
+          merge-multiple: true
 
-      - name: Executar testes selecionados
-        id: executar-testes
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-          tipo_teste="${{ inputs.tipo_teste || 'todos' }}"
-
-          case "$tipo_teste" in
-            api)
-              npm run test:api
-              ;;
-            e2e)
-              npm run test:e2e
-              ;;
-            todos)
-              npm test
-              ;;
-            *)
-              echo "Tipo de teste inválido: $tipo_teste"
-              codigo_saida=1
-              ;;
-          esac
-
-          if [ -z "${codigo_saida+x}" ]; then
-            codigo_saida=$?
-          fi
-          echo "codigo_saida=$codigo_saida" >> "$GITHUB_OUTPUT"
+      - name: Unificar relatório do Playwright
+        run: npx playwright merge-reports --config playwright.merge.config.ts todos-blobs
 
       - name: Gerar resumo da execução
-        if: ${{ always() }}
         run: npm run gerar:resumo
 
       - name: Obter endereço do GitHub Pages
         id: pages
-        if: ${{ always() }}
         continue-on-error: true
         uses: actions/configure-pages@v6
 
       - name: Gerar relatório Allure
-        if: ${{ always() }}
         shell: bash
         env:
           URL_RELATORIO: ${{ steps.pages.outputs.base_url }}
@@ -110,7 +180,8 @@ jobs:
           # O historico vem do proprio relatorio publicado e alimenta as tendencias e o historico de cada teste.
           if [ -n "$URL_RELATORIO" ]; then
             for arquivo in history.json history-trend.json duration-trend.json categories-trend.json retry-trend.json; do
-              curl -sfL "$URL_RELATORIO/history/$arquivo" -o "allure-results/history/$arquivo"                 || echo "Histórico $arquivo ainda não publicado."
+              curl -sfL "$URL_RELATORIO/history/$arquivo" -o "allure-results/history/$arquivo" \
+                || echo "Histórico $arquivo ainda não publicado."
             done
           fi
 
@@ -119,7 +190,7 @@ jobs:
             "name": "GitHub Actions",
             "type": "github",
             "buildOrder": ${{ github.run_number }},
-            "buildName": "Execução #${{ github.run_number }} (${{ inputs.tipo_teste || 'todos' }})",
+            "buildName": "Execução #${{ github.run_number }} ($TIPO_TESTE)",
             "buildUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
             "reportUrl": "$URL_RELATORIO/",
             "reportName": "ServeRest - Automação de testes"
@@ -128,10 +199,19 @@ jobs:
 
           npm run allure:gerar
 
+      - name: Salvar relatórios
+        uses: actions/upload-artifact@v7
+        with:
+          name: relatorios-${{ env.TIPO_TESTE }}
+          path: |
+            playwright-report/
+            allure-report/
+          if-no-files-found: ignore
+
       - name: Preparar publicação do Allure
         id: preparar-publicacao
         # Publica apenas a suite completa da main, para o historico nao misturar execucoes parciais ou de PR.
-        if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (inputs.tipo_teste || 'todos') == 'todos' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && env.TIPO_TESTE == 'todos' }}
         shell: bash
         run: |
           if [ -f allure-report/index.html ]; then
@@ -141,32 +221,16 @@ jobs:
           fi
 
       - name: Enviar relatório Allure para o GitHub Pages
-        if: ${{ always() && steps.preparar-publicacao.outputs.publicar == 'true' }}
+        if: ${{ steps.preparar-publicacao.outputs.publicar == 'true' }}
         uses: actions/upload-pages-artifact@v5
         with:
           path: allure-report
 
-      - name: Publicar relatório e evidências
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: relatorio-${{ inputs.tipo_teste || 'todos' }}
-          path: |
-            playwright-report/
-            allure-report/
-            test-results/
-          if-no-files-found: ignore
-
-      - name: Falhar job se os testes falharem
-        if: ${{ always() && steps.executar-testes.outputs.codigo_saida != '0' }}
-        run: exit 1
-
   publicar-allure:
-    name: Publicar relatório Allure
-    needs: executar-testes
-    # Roda mesmo com testes falhando: o relatorio e justamente onde as falhas sao analisadas.
-    if: ${{ always() && needs.executar-testes.outputs.publicar == 'true' }}
-    runs-on: ubuntu-latest
+    name: 🚀 Publicar Allure
+    needs: relatorios
+    if: ${{ !cancelled() && needs.relatorios.outputs.publicar == 'true' }}
+    runs-on: ubuntu-24.04
 
     permissions:
       pages: write
