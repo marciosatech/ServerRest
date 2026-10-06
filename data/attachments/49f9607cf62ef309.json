@@ -1,0 +1,8 @@
+{
+  "metodo": "POST",
+  "url": "https://serverest.dev/login",
+  "corpo": {
+    "email": "login-invalido@example.com",
+    "password": "***"
+  }
+}
