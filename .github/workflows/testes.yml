@@ -16,6 +16,15 @@ on:
           - e2e
           - todos
 
+# Necessario para publicar o relatorio Allure na branch gh-pages.
+permissions:
+  contents: write
+
+# Evita que duas execucoes publiquem o relatorio ao mesmo tempo e percam historico.
+concurrency:
+  group: testes-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   executar-testes:
     name: Executar testes ${{ inputs.tipo_teste || 'todos' }}
@@ -78,6 +87,55 @@ jobs:
         if: ${{ always() }}
         run: npm run gerar:resumo
 
+      - name: Recuperar histórico do Allure
+        if: ${{ always() }}
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Gerar relatório Allure
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p allure-results
+
+          # O historico da ultima publicacao alimenta os graficos de tendencia e o historico de cada teste.
+          if [ -d gh-pages/history ]; then
+            cp -r gh-pages/history allure-results/history
+          fi
+
+          cat > allure-results/executor.json <<EOF
+          {
+            "name": "GitHub Actions",
+            "type": "github",
+            "buildOrder": ${{ github.run_number }},
+            "buildName": "Execução #${{ github.run_number }} (${{ inputs.tipo_teste || 'todos' }})",
+            "buildUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "reportUrl": "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/",
+            "reportName": "ServeRest - Automação de testes"
+          }
+          EOF
+
+          npm run allure:gerar
+
+      - name: Publicar relatório Allure no GitHub Pages
+        # Publica apenas a suite completa da main, para o historico nao misturar execucoes parciais ou de PR.
+        if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (inputs.tipo_teste || 'todos') == 'todos' }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-report
+          commit_message: 'Relatório Allure da execução #${{ github.run_number }}'
+
+      - name: Adicionar link do Allure ao resumo
+        if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (inputs.tipo_teste || 'todos') == 'todos' }}
+        shell: bash
+        run: |
+          echo "📊 **Relatório Allure:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ (pode levar 1-2 minutos para atualizar)" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publicar relatório e evidências
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -85,6 +143,7 @@ jobs:
           name: relatorio-${{ inputs.tipo_teste || 'todos' }}
           path: |
             playwright-report/
+            allure-report/
             test-results/
           if-no-files-found: ignore
 

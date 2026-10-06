@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 export class HomePage {
   readonly page: Page;
@@ -10,7 +10,9 @@ export class HomePage {
   }
 
   async validarPaginaExibida(): Promise<void> {
-    await expect(this.page).toHaveURL(/\/home$/);
-    await expect(this.tituloProdutos).toBeVisible();
+    await test.step('Validar que a página inicial foi exibida', async () => {
+      await expect(this.page).toHaveURL(/\/home$/);
+      await expect(this.tituloProdutos).toBeVisible();
+    });
   }
 }

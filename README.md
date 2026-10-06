@@ -474,6 +474,58 @@ Essas evidências são muito importantes para entender falhas e analisar regress
 
 ---
 
+## Allure Report
+
+Além do relatório HTML do Playwright, a suíte gera um **Allure Report** com histórico de execuções, gráficos de tendência, categorias de falha, severidade e evidências anexadas.
+
+📊 **Relatório publicado:** https://marciosatech.github.io/ServerRest/
+
+### O que aparece no relatório
+
+- **Suites:** testes agrupados por camada (`API` / `E2E`) e funcionalidade.
+- **Behaviors:** organização por épico, feature e história (ex.: Autenticação › Login › Credenciais inválidas).
+- **Steps legíveis:** cada ação dos Page Objects e do client de API vira um passo (`test.step`).
+- **Anexos:** screenshots de evidência, vídeo, trace e screenshot das falhas; nos testes de API, a requisição e a resposta (credenciais vindas de secrets são mascaradas).
+- **Environment:** ambiente, URLs, navegador, sistema operacional, Node.js, branch e commit.
+- **Categories:** falhas de asserção, timeouts, erros de rede, testes instáveis e ignorados.
+- **Histórico e tendência:** resultado de cada teste nas execuções anteriores e evolução da suíte ao longo do tempo.
+
+### Como gerar localmente
+
+> Requer Java 8+ instalado (o Allure 2 roda na JVM).
+
+```bash
+npm run allure:limpar   # remove resultados de execuções anteriores
+npm test                # gera os resultados em allure-results/
+npm run allure:servir   # gera e abre o relatório em um servidor temporário
+```
+
+Ou, para gerar a pasta `allure-report/` e abri-la depois:
+
+```bash
+npm run allure:gerar
+npm run allure:abrir
+```
+
+### Como funciona no GitHub Actions
+
+1. Os testes geram os resultados em `allure-results/`.
+2. O workflow baixa a pasta `history/` da branch `gh-pages` (última publicação) para dentro dos resultados.
+3. Um `executor.json` é criado com o número e o link da execução.
+4. O relatório é gerado e publicado na branch `gh-pages`, servida pelo GitHub Pages.
+
+A publicação acontece somente em execuções **completas** (`todos`) na branch `main`, para que o histórico não misture execuções parciais nem de pull requests. Em PRs e execuções parciais, o relatório fica disponível nos artefatos da execução.
+
+### Configuração única do GitHub Pages
+
+Após a primeira execução na `main` (que cria a branch `gh-pages`):
+
+1. Acesse **Settings › Pages**.
+2. Em **Source**, selecione **Deploy from a branch**.
+3. Escolha a branch **`gh-pages`** e a pasta **`/ (root)`**.
+
+---
+
 ## Boas práticas do projeto
 
 Para manter a automação organizada e estável, vale seguir estas regras:

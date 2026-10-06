@@ -5,8 +5,9 @@ export async function capturarEvidencia(
   testInfo: TestInfo,
   name: string,
 ): Promise<void> {
-  await page.screenshot({
-    path: testInfo.outputPath(`${name}.png`),
-    fullPage: true,
-  });
+  const caminho = testInfo.outputPath(`${name}.png`);
+
+  await page.screenshot({ path: caminho, fullPage: true });
+  // Anexar faz a evidencia aparecer nos relatorios HTML e Allure, nao apenas na pasta de saida.
+  await testInfo.attach(name, { path: caminho, contentType: 'image/png' });
 }
