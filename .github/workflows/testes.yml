@@ -16,11 +16,10 @@ on:
           - e2e
           - todos
 
-# Necessario para publicar o relatorio Allure na branch gh-pages.
+# Permissao minima por padrao; cada job pede apenas o que precisa.
 permissions:
-  contents: write
+  contents: read
 
-# Evita que duas execucoes publiquem o relatorio ao mesmo tempo e percam historico.
 concurrency:
   group: testes-${{ github.ref }}
   cancel-in-progress: false
@@ -29,6 +28,13 @@ jobs:
   executar-testes:
     name: Executar testes ${{ inputs.tipo_teste || 'todos' }}
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: read
+
+    outputs:
+      publicar: ${{ steps.preparar-publicacao.outputs.publicar }}
 
     env:
       LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
@@ -87,23 +93,25 @@ jobs:
         if: ${{ always() }}
         run: npm run gerar:resumo
 
-      - name: Recuperar histórico do Allure
+      - name: Obter endereço do GitHub Pages
+        id: pages
         if: ${{ always() }}
-        uses: actions/checkout@v4
         continue-on-error: true
-        with:
-          ref: gh-pages
-          path: gh-pages
+        uses: actions/configure-pages@v6
 
       - name: Gerar relatório Allure
         if: ${{ always() }}
         shell: bash
+        env:
+          URL_RELATORIO: ${{ steps.pages.outputs.base_url }}
         run: |
-          mkdir -p allure-results
+          mkdir -p allure-results/history
 
-          # O historico da ultima publicacao alimenta os graficos de tendencia e o historico de cada teste.
-          if [ -d gh-pages/history ]; then
-            cp -r gh-pages/history allure-results/history
+          # O historico vem do proprio relatorio publicado e alimenta as tendencias e o historico de cada teste.
+          if [ -n "$URL_RELATORIO" ]; then
+            for arquivo in history.json history-trend.json duration-trend.json categories-trend.json retry-trend.json; do
+              curl -sfL "$URL_RELATORIO/history/$arquivo" -o "allure-results/history/$arquivo"                 || echo "Histórico $arquivo ainda não publicado."
+            done
           fi
 
           cat > allure-results/executor.json <<EOF
@@ -113,28 +121,30 @@ jobs:
             "buildOrder": ${{ github.run_number }},
             "buildName": "Execução #${{ github.run_number }} (${{ inputs.tipo_teste || 'todos' }})",
             "buildUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-            "reportUrl": "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/",
+            "reportUrl": "$URL_RELATORIO/",
             "reportName": "ServeRest - Automação de testes"
           }
           EOF
 
           npm run allure:gerar
 
-      - name: Publicar relatório Allure no GitHub Pages
+      - name: Preparar publicação do Allure
+        id: preparar-publicacao
         # Publica apenas a suite completa da main, para o historico nao misturar execucoes parciais ou de PR.
-        if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (inputs.tipo_teste || 'todos') == 'todos' }}
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: allure-report
-          commit_message: 'Relatório Allure da execução #${{ github.run_number }}'
-
-      - name: Adicionar link do Allure ao resumo
         if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (inputs.tipo_teste || 'todos') == 'todos' }}
         shell: bash
         run: |
-          echo "📊 **Relatório Allure:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ (pode levar 1-2 minutos para atualizar)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f allure-report/index.html ]; then
+            echo "publicar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Relatório Allure não encontrado; publicação ignorada."
+          fi
+
+      - name: Enviar relatório Allure para o GitHub Pages
+        if: ${{ always() && steps.preparar-publicacao.outputs.publicar == 'true' }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: allure-report
 
       - name: Publicar relatório e evidências
         if: ${{ always() }}
@@ -150,3 +160,32 @@ jobs:
       - name: Falhar job se os testes falharem
         if: ${{ always() && steps.executar-testes.outputs.codigo_saida != '0' }}
         run: exit 1
+
+  publicar-allure:
+    name: Publicar relatório Allure
+    needs: executar-testes
+    # Roda mesmo com testes falhando: o relatorio e justamente onde as falhas sao analisadas.
+    if: ${{ always() && needs.executar-testes.outputs.publicar == 'true' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+
+    steps:
+      - name: Publicar no GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5
+
+      - name: Adicionar link do Allure ao resumo
+        shell: bash
+        run: |
+          echo "📊 **Relatório Allure publicado:** ${{ steps.deploy.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"

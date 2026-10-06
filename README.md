@@ -509,20 +509,29 @@ npm run allure:abrir
 
 ### Como funciona no GitHub Actions
 
-1. Os testes geram os resultados em `allure-results/`.
-2. O workflow baixa a pasta `history/` da branch `gh-pages` (última publicação) para dentro dos resultados.
-3. Um `executor.json` é criado com o número e o link da execução.
-4. O relatório é gerado e publicado na branch `gh-pages`, servida pelo GitHub Pages.
+O workflow tem dois jobs:
+
+1. **Executar testes**
+   - roda a suíte e gera os resultados em `allure-results/`;
+   - baixa a pasta `history/` do próprio relatório publicado no Pages, para manter tendências e histórico;
+   - cria um `executor.json` com o número e o link da execução;
+   - gera o relatório e o envia como artefato de Pages.
+2. **Publicar relatório Allure**
+   - publica o relatório no GitHub Pages com as actions oficiais (`actions/deploy-pages`);
+   - roda mesmo quando há testes falhando, já que o relatório é onde as falhas são analisadas.
+
+Cada job tem apenas as permissões necessárias: o job de testes só lê, e só o job de publicação pode escrever no Pages.
 
 A publicação acontece somente em execuções **completas** (`todos`) na branch `main`, para que o histórico não misture execuções parciais nem de pull requests. Em PRs e execuções parciais, o relatório fica disponível nos artefatos da execução.
 
 ### Configuração única do GitHub Pages
 
-Após a primeira execução na `main` (que cria a branch `gh-pages`):
+Em cada repositório que usar este projeto como base, uma única vez:
 
 1. Acesse **Settings › Pages**.
-2. Em **Source**, selecione **Deploy from a branch**.
-3. Escolha a branch **`gh-pages`** e a pasta **`/ (root)`**.
+2. Em **Build and deployment › Source**, selecione **GitHub Actions**.
+
+Sem esse passo, o job **Publicar relatório Allure** falha. O `GITHUB_TOKEN` não tem permissão para ativar o Pages sozinho.
 
 ---
 
